@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -34,7 +35,12 @@ func checkURL(url string, results chan string, sem chan struct{}, bar *progressb
 		bar.Add(1)
 		return
 	}
-	defer resp.Body.Close()
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			fmt.Println(err)
+		}
+	}(resp.Body)
 
 	results <- fmt.Sprintf("%s,%d", url, resp.StatusCode)
 	bar.Add(1)
@@ -49,7 +55,7 @@ func worker(jobs <-chan string, results chan string, sem chan struct{}, bar *pro
 
 func main() {
 	maxWorkersPtr := flag.Int("n", 100, "最大工作线程数")
-	timeoutPtr := flag.Int("t", 3000, "超时时间（毫秒）")
+	timeoutPtr := flag.Int("t", 1000, "超时时间（毫秒）")
 	urlsFilePtr := flag.String("f", "urls.txt", "包含URL的文件")
 	flag.Parse()
 
@@ -61,7 +67,7 @@ func main() {
 	bar := progressbar.Default(int64(len(urls)))
 
 	for i := 0; i < *maxWorkersPtr; i++ {
-		go worker(jobs, results, sem, bar, time.Duration(*timeoutPtr)*time.Millisecond)
+		go worker(jobs, results, sem, bar, time.Duration(*timeoutPtr))
 	}
 
 	for _, url := range urls {
@@ -74,7 +80,12 @@ func main() {
 		fmt.Println("创建文件时出错:", err)
 		return
 	}
-	defer file.Close()
+	defer func(file *os.File) {
+		err := file.Close()
+		if err != nil {
+			fmt.Println(err)
+		}
+	}(file)
 
 	for range urls {
 		res := <-results
@@ -92,7 +103,13 @@ func readURLsFromFile(filename string) []string {
 		fmt.Println("打开文件时出错:", err)
 		return urls
 	}
-	defer file.Close()
+	defer func(file *os.File) {
+		err := file.Close()
+		if err != nil {
+			fmt.Println(err)
+			// 处理文件关闭错误
+		}
+	}(file)
 
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
